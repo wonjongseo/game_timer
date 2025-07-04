@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -174,38 +175,67 @@ class _FancyTimerPageState extends State<FancyTimerPage> {
   }
 
   // 타이머 로직
+  // void _startTimer() {
+  //   final interval = _pickedDuration.inSeconds;
+  //   if (interval <= 0) return;
+  //   if (_isRepeating && !_isUnlimited) {
+  //     final count = int.tryParse(_repeatCountController.text) ?? 0;
+  //     _remainingRepeats = count > 0 ? count : 0;
+  //     if (_remainingRepeats == 0) return;
+  //   }
+  //   _timer?.cancel();
+  //   setState(() => _remaining = interval);
+  //   _timer = Timer.periodic(Duration(seconds: 1), (t) async {
+  //     final next = _remaining - 1;
+  //     if (next <= 0) {
+  //       await _playAlarmOnce();
+  //       if (_isRepeating) {
+  //         if (_isUnlimited)
+  //           setState(() => _remaining = interval);
+  //         else {
+  //           _remainingRepeats--;
+  //           if (_remainingRepeats > 0)
+  //             setState(() => _remaining = interval);
+  //           else {
+  //             t.cancel();
+  //             setState(() => _remaining = 0);
+  //           }
+  //         }
+  //       } else {
+  //         t.cancel();
+  //         setState(() => _remaining = 0);
+  //       }
+  //     } else
+  //       setState(() => _remaining = next);
+  //   });
+  // }
+
   void _startTimer() {
-    final interval = _pickedDuration.inSeconds;
-    if (interval <= 0) return;
-    if (_isRepeating && !_isUnlimited) {
-      final count = int.tryParse(_repeatCountController.text) ?? 0;
-      _remainingRepeats = count > 0 ? count : 0;
-      if (_remainingRepeats == 0) return;
-    }
+    final totalSec = _pickedDuration.inSeconds;
+    if (totalSec <= 0) return;
+
+    // 1) 기존 타이머 취소 & UI 초기화
     _timer?.cancel();
-    setState(() => _remaining = interval);
-    _timer = Timer.periodic(Duration(seconds: 1), (t) async {
+    setState(() => _remaining = totalSec);
+
+    // 2) 1초마다 카운트다운
+    _timer = Timer.periodic(Duration(seconds: 1), (t) {
       final next = _remaining - 1;
       if (next <= 0) {
-        await _playAlarmOnce();
-        if (_isRepeating) {
-          if (_isUnlimited)
-            setState(() => _remaining = interval);
-          else {
-            _remainingRepeats--;
-            if (_remainingRepeats > 0)
-              setState(() => _remaining = interval);
-            else {
-              t.cancel();
-              setState(() => _remaining = 0);
-            }
-          }
-        } else {
-          t.cancel();
-          setState(() => _remaining = 0);
-        }
-      } else
+        // 2-1) 0초 도달 시
+        t.cancel();
+        setState(() => _remaining = 0);
+
+        // 2-2) 여기에 백그라운드 서비스 호출
+        final playDuration = int.tryParse(_soundDurationController.text) ?? 3;
+        FlutterBackgroundService().invoke('play', {
+          'mp3': _selectedMp3,
+          'duration': playDuration,
+        });
+      } else {
+        // 2-3) 아직 > 0일 때 UI 업데이트
         setState(() => _remaining = next);
+      }
     });
   }
 
@@ -220,102 +250,184 @@ class _FancyTimerPageState extends State<FancyTimerPage> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     String two(int n) => n.toString().padLeft(2, '0');
     final h = two(_pickedDuration.inHours),
         m = two(_pickedDuration.inMinutes.remainder(60)),
         s = two(_pickedDuration.inSeconds.remainder(60));
+    final playThreshold = int.tryParse(_soundDurationController.text) ?? 3;
+
     return Scaffold(
-      appBar: AppBar(title: Text('Fancy Timer')),
-      body: SingleChildScrollView(
-        padding: EdgeInsets.all(16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // 타이머 선택
-          GestureDetector(
-            onTap: _showDurationPicker,
-            child: Container(
-              padding: EdgeInsets.symmetric(vertical: 12, horizontal: 24),
-              decoration: BoxDecoration(
-                  border: Border.all(color: Colors.blueGrey),
-                  borderRadius: BorderRadius.circular(8)),
-              child: Text('$h:$m:$s',
-                  style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold)),
+      body: SafeArea(
+        child: GestureDetector(
+          onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Card(
+              elevation: 4,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
+              margin: EdgeInsets.zero,
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // 타이머 선택부
+                    Text('🔔 타이머 설정',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+                    GestureDetector(
+                      onTap: _showDurationPicker,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        decoration: BoxDecoration(
+                          border:
+                              Border.all(color: colorScheme.primary, width: 2),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          '$h:$m:$s',
+                          style: TextStyle(
+                            fontSize: 36,
+                            fontWeight: FontWeight.bold,
+                            color: colorScheme.primary,
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    // 사운드 선택부
+                    Text('🎵 알람 사운드',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      value: _selectedMp3,
+                      decoration: InputDecoration(
+                        contentPadding:
+                            EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                      ),
+                      items: _playList.map((path) {
+                        final label = path.split('/').last;
+                        return DropdownMenuItem(
+                            value: path, child: Text(label));
+                      }).toList(),
+                      onChanged: (v) => setState(() => _selectedMp3 = v!),
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    // 녹음 토글
+                    OutlinedButton.icon(
+                      icon: Icon(_isRecordingNow ? Icons.stop : Icons.mic,
+                          color: colorScheme.primary),
+                      label: Text(_isRecordingNow ? '녹음 중지' : '새로 녹음',
+                          style: TextStyle(color: colorScheme.primary)),
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: colorScheme.primary),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                        padding: EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      onPressed: _toggleRecording,
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    // 재생 시간
+                    Text('⏱️ 재생 시간 (초)',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _soundDurationController,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        hintText: '예: 3',
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                        contentPadding:
+                            EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                      ),
+                    ),
+
+                    const SizedBox(height: 32),
+
+                    // 실행 / 중지 버튼
+                    Wrap(
+                      spacing: 16,
+                      runSpacing: 12,
+                      alignment: WrapAlignment.center,
+                      children: [
+                        ElevatedButton.icon(
+                          icon: Icon(Icons.play_arrow),
+                          label: Text('실행'),
+                          style: ElevatedButton.styleFrom(
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 24, vertical: 14),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                          ),
+                          onPressed: _startTimer,
+                        ),
+                        OutlinedButton.icon(
+                          icon: Icon(Icons.stop),
+                          label: Text('중지'),
+                          style: OutlinedButton.styleFrom(
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 24, vertical: 14),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                          ),
+                          onPressed: _stopTimer,
+                        ),
+                      ],
+                    ),
+
+                    // 남은 시간 표시 (부드러운 전환)
+                    const SizedBox(height: 20),
+                    if (_remaining > 0)
+                      TweenAnimationBuilder<double>(
+                        // 남은 시간이 임팩트 구간(<= playThreshold)이면 1.2배 → 1.0배를 반복
+                        tween: Tween(
+                            begin: 1.0,
+                            end: _remaining <= playThreshold ? 1.2 : 1.0),
+                        duration: const Duration(milliseconds: 500),
+                        curve: Curves.easeInOut,
+                        builder: (context, scale, child) => Transform.scale(
+                          scale: scale,
+                          child: child,
+                        ),
+                        onEnd: () {
+                          // 임팩트 구간일 때만 계속 애니메이션 루프
+                          if (_remaining <= playThreshold) setState(() {});
+                        },
+                        child: Text(
+                          '남은 시간: $_remaining 초',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w600,
+                            // 임팩트 구간이면 빨간색, 아니면 기본
+                            color: _remaining <= playThreshold
+                                ? colorScheme.error
+                                : colorScheme.onSurface,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ),
           ),
-          SizedBox(height: 16),
-          // 사운드 선택
-          Text('알람 사운드 선택', style: TextStyle(fontSize: 16)),
-          DropdownButton<String>(
-              value: _selectedMp3,
-              isExpanded: true,
-              items: _playList.map((path) {
-                final label = path.startsWith('sounds/')
-                    ? path.split('/').last
-                    : File(path).uri.pathSegments.last;
-                return DropdownMenuItem(value: path, child: Text(label));
-              }).toList(),
-              onChanged: (v) => setState(() => _selectedMp3 = v!)),
-          SizedBox(height: 8),
-          // 녹음 토글: 녹음 중지 시 파일명 입력 팝업
-          ElevatedButton.icon(
-            icon: Icon(_isRecordingNow ? Icons.stop : Icons.mic),
-            label: Text(_isRecordingNow ? '녹음 중지(저장)' : '새로 녹음하기'),
-            onPressed: _toggleRecording,
-          ),
-          SizedBox(height: 16),
-          // 반복 옵션
-          CheckboxListTile(
-              title: Text('반복하기'),
-              value: _isRepeating,
-              onChanged: (v) => setState(() => _isRepeating = v!)),
-          if (_isRepeating) ...[
-            Row(children: [
-              Expanded(
-                  child: RadioListTile<bool>(
-                      title: Text('무제한'),
-                      value: true,
-                      groupValue: _isUnlimited,
-                      onChanged: (v) => setState(() => _isUnlimited = v!))),
-              Expanded(
-                  child: RadioListTile<bool>(
-                      title: Text('횟수 지정'),
-                      value: false,
-                      groupValue: _isUnlimited,
-                      onChanged: (v) => setState(() => _isUnlimited = v!))),
-            ]),
-            if (!_isUnlimited)
-              TextField(
-                  controller: _repeatCountController,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(
-                      labelText: '반복 횟수', border: OutlineInputBorder())),
-          ],
-          SizedBox(height: 16),
-          // 사운드 지속시간
-          Text('사운드 재생 시간(초)', style: TextStyle(fontSize: 16)),
-          Row(children: [
-            Expanded(
-                child: TextField(
-                    controller: _soundDurationController,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(border: OutlineInputBorder()))),
-            SizedBox(width: 8),
-            Text('초'),
-          ]),
-          SizedBox(height: 16),
-          // 실행/중지 버튼
-          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            ElevatedButton(onPressed: _startTimer, child: Text('실행')),
-            SizedBox(width: 16),
-            ElevatedButton(onPressed: _stopTimer, child: Text('중지')),
-          ]),
-          if (_remaining > 0) ...[
-            SizedBox(height: 24),
-            Text('남은 시간: $_remaining 초', style: TextStyle(fontSize: 18)),
-            if (_isRepeating && !_isUnlimited)
-              Text('남은 반복 횟수: $_remainingRepeats',
-                  style: TextStyle(fontSize: 16, color: Colors.grey)),
-          ],
-        ]),
+        ),
       ),
     );
   }
